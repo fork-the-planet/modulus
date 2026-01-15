@@ -14,20 +14,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# This CI runs on pull requests and uses testmon to skip tests
-# that don't have changed dependencies based on the nightly cache.
-# The tests run here will only use UV.
+# This CI runs nightly to generate the coverage report and testmon database.
+# It runs ALL tests and caches the testmon database for use by PR workflows.
+# The tests run here will only use UV.  This is meant to be nightly functionality
+# testing AND a baseline dependency graph for PRs.
+
 
 # TO DO: THE COVERAGE LIMIT IS VERY LOW, BECAUSE THIS IS NOT USING GPU TESTS OR
 # THE DATA-DRIVEN TESTS.  RAISE THIS UP AGAIN EVENTUALLY.
 
-name: Pull Request Github CI
+
+name: Nightly Github Workflow
 on:
-  push:
-    branches:
-      - "pull-request/[0-9]+"
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
   workflow_dispatch:
-    # Allow manual triggering for debugging the CI.
+    # Allow manual triggering
 
 # Container image used across all jobs - update this single value to change everywhere
 # Note: env context not available in container.image, so we hardcode the value
@@ -56,7 +59,7 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: .venv
-        key: uv-env-pr-latest
+        key: uv-env-nightly-latest
 
     - name: Install package with uv
       if: steps.cache-uv-restore.outputs.cache-hit != 'true'
@@ -73,7 +76,7 @@ jobs:
     - name: Delete old environment cache
       if: steps.cache-uv-restore.outputs.cache-hit != 'true'
       run: |
-        gh cache delete "uv-env-pr-latest" || true
+        gh cache delete "uv-env-nightly-latest" || true
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -82,15 +85,15 @@ jobs:
       uses: actions/cache/save@v4
       with:
         path: .venv
-        key: uv-env-pr-latest
+        key: uv-env-nightly-latest
 
-  # Stage 2: Run testmon tests
+  # Stage 2: Run testmon tests and cache the database
   testmon:
     name: Testmon
     needs: build-environment
     runs-on: linux-amd64-gpu-h100-latest-1
     container:
-      image: nvcr.io/nvidia/pytorch:25.01-py3
+      image: nvcr.io/nvidia/pytorch:25.12-py3
 
     steps:
     - uses: actions/checkout@v4
@@ -108,21 +111,28 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: .venv
-        key: uv-env-pr-latest
+        key: uv-env-nightly-latest
         fail-on-cache-miss: true
 
-    - name: Restore testmon database from cache
-      uses: actions/cache/restore@v4
+    - name: Run core tests (collect all for testmon)
+      run: |
+        # This populates the testmon database for PR workflows
+        uv run python -m pytest --testmon --ignore-glob="*docs*" --ignore-glob="*examples*"
+
+    - name: Delete old testmon cache
+      run: |
+        gh cache delete "testmon-nightly-latest" || true
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Save testmon database to cache
+      uses: actions/cache/save@v4
       with:
         path: |
           .testmondata
           .testmondata-shm
           .testmondata-wal
         key: testmon-nightly-latest
-
-    - name: Run core tests (with testmon)
-      run: |
-        uv run python -m pytest --testmon --ignore-glob="*docs*" --ignore-glob="*examples*"
 
   # Stage 3: Run coverage tests and upload artifacts
   coverage:
@@ -148,50 +158,49 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: .venv
-        key: uv-env-pr-latest
+        key: uv-env-nightly-latest
         fail-on-cache-miss: true
 
-    - name: Restore testmon database from cache
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          .testmondata
-          .testmondata-shm
-          .testmondata-wal
-        key: testmon-nightly-latest
-
-    - name: Restore nightly coverage baseline from cache
-      id: cache-coverage-restore
-      uses: actions/cache/restore@v4
-      with:
-        path: .coverage*
-        key: coverage-nightly-latest
-
-    - name: Run core tests for coverage report (testmon-selected)
+    - name: Run core tests for coverage report
       run: |
-        # Use testmon to only run tests affected by changes, with coverage
-        uv run coverage run --rcfile='test/coverage.pytest.rc' -m pytest --testmon --ignore-glob="*docs*" --ignore-glob="*examples*"
+        uv run coverage run --rcfile='test/coverage.pytest.rc' -m pytest --ignore-glob="*docs*" --ignore-glob="*examples*"
 
     - name: Run doc tests (testmon not supported for doctests)
       run: |
         uv run coverage run --rcfile='test/coverage.docstring.rc' -m pytest --doctest-modules physicsnemo/ --ignore-glob="*internal*" --ignore-glob="*experimental*"
 
+    - name: Delete old coverage cache
+      run: |
+        gh cache delete "coverage-nightly-latest" || true
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Save coverage files to cache
+      uses: actions/cache/save@v4
+      with:
+        path: .coverage*
+        key: coverage-nightly-latest
+
     - name: Merge coverage reports
       run: |
-        # List all coverage files being combined
-        echo "Coverage files to combine:"
-        ls -la .coverage* 2>/dev/null || echo "No coverage files found"
-
-        # Combine all .coverage* files
         uv run coverage combine
-
         uv run coverage report --show-missing --omit="*test*" --omit="*internal*" --omit="*experimental*" --fail-under=45
         uv run coverage html
+        # Also create an XML report for potential CI integrations
         uv run coverage xml -o coverage.xml
 
     - name: Upload coverage HTML report
       uses: actions/upload-artifact@v4
       with:
-        name: coverage-report-pr
+        name: coverage-report-nightly
         path: htmlcov/
         retention-days: 7
+
+    - name: Upload combined coverage data
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-data-nightly
+        path: |
+          .coverage
+          coverage.xml
+        retention-days: 30
