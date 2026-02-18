@@ -1,4 +1,3 @@
-#!/bin/bash
 # SPDX-FileCopyrightText: Copyright (c) 2023 - 2026 NVIDIA CORPORATION & AFFILIATES.
 # SPDX-FileCopyrightText: All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -15,20 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Run ASV benchmarks from the repository root directory.
-# Usage: ./benchmarks/run_benchmarks.sh [additional asv arguments]
+from .interpolation import Interpolation, interpolation
 
-set -e
-
-# Navigate to the repository root directory.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-cd "$REPO_ROOT_DIR"
-
-echo -e "\033[0;32mRunning ASV benchmarks from: $REPO_ROOT_DIR\033[0m"
-
-# Run ASV with spawn method for CUDA compatibility.
-asv run --launch-method spawn "$@"
-
-# Generate functional benchmark plots if results exist.
-python benchmarks/physicsnemo/nn/functional/plot_functional_benchmarks.py
+__all__ = ["Interpolation", "interpolation"]
