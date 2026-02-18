@@ -587,11 +587,11 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         sigma_dot_t_bc = self.sigma_dot(t_bc)
         alpha_t_bc = self.alpha(t_bc)
         alpha_dot_t_bc = self.alpha_dot(t_bc)
-        g_sq = (
+        g_sq_bc = (
             2 * sigma_dot_t_bc * sigma_t_bc
             - 2 * (alpha_dot_t_bc / alpha_t_bc) * sigma_t_bc**2
         )
-        return g_sq
+        return g_sq_bc
 
     def x0_to_score(
         self,
@@ -765,8 +765,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
             ) -> Float[Tensor, " B *dims"]:
                 score = score_fn(x, t)
                 f = drift(x, t)
-                g_sq = diffusion(x, t)
-                dx_dt = f - 0.5 * g_sq * score
+                g_sq_bc = diffusion(x, t)
+                dx_dt = f - 0.5 * g_sq_bc * score
                 return dx_dt
 
             return ode_denoiser
@@ -779,10 +779,10 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
             ) -> Float[Tensor, " B *dims"]:
                 score = score_fn(x, t)
                 f = drift(x, t)
-                g_sq = diffusion(x, t)
+                g_sq_bc = diffusion(x, t)
                 # Deterministic part of the SDE drift
                 # Note: stochastic term g(t)*dW is handled by the solver
-                dx_dt = f - g_sq * score
+                dx_dt = f - g_sq_bc * score
                 return dx_dt
 
             return sde_denoiser
